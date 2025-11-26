@@ -1,47 +1,43 @@
 import { NextResponse } from "next/server";
-import Replicate from "replicate";
-import { unstable_noStore as noStore } from "next/cache";
-import { updateGeneration } from "@/models/generation";
-import { getUserGenertedList } from "@/services/handleImage";
-import to from "await-to-js";
 
-const replicate = new Replicate({
-    auth: process.env.REPLICATE_API_TOKEN,
-});
+export async function POST(req: Request) {
+  const { prompt } = await req.json();
 
-// Prevent Next.js / Vercel from caching responses
-// See https://github.com/replicate/replicate-javascript/issues/136#issuecomment-1728053102
-replicate.fetch = (url, options) => {
-    return fetch(url, { cache: "no-store", ...options });
-};
+  
+  const apiKey = process.env.NB_API_KEY; 
+  const baseUrl = process.env.NB_BASE_URL || "https://api.nbpro.org/v1"; 
 
-export async function GET(request: Request, { params }: any) {
-    noStore();
-    const { pageNo = 1 } = params;
-    // @ts-ignore
-    const { searchParams }: URLSearchParams = request.nextUrl;
-    const userId = searchParams.get("userId");
+  if (!apiKey) {
+    return NextResponse.json({ error: "API Key missing" }, { status: 500 });
+  }
 
-    const [genertedErr, { generationList = [], total }]: any = await to(
-        getUserGenertedList(pageNo, 48, userId)
-    );
+  try {
+    // 伪装成 OpenAI DALL-E 3 请求
+    const response = await fetch(`${baseUrl}/images/generations`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: "dall-e-3", // 这里如果你知道 NB 的 Gemini 模型ID，可以改成 "imagen-3"
+        prompt: prompt,
+        n: 1,
+        size: "1024x1024", 
+      }),
+    });
 
-    if (genertedErr) {
-        console.error("generted get error:", genertedErr);
-        return NextResponse.json(
-            { success: false, message: genertedErr.message },
-            { status: 401 }
-        );
+    const data = await response.json();
+
+    if (!response.ok) {
+      console.error("API Error:", data);
+      throw new Error(data.error?.message || "Failed to generate image");
     }
 
-    console.log("generationList:", generationList);
+    // 只要 API 返回的是标准 OpenAI 格式，这里就能跑通
+    return NextResponse.json(data.data[0].url); 
 
-    return NextResponse.json(
-        {
-            success: true,
-            generationList,
-            total,
-        },
-        { status: 200 }
-    );
+  } catch (error) {
+    return NextResponse.json({ detail: error.message }, { status: 500 });
+  }
 }
